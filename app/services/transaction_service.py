@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
+from app.models.account import Account
 from app.repositories.transaction_repository import TransactionRepository
 from app.schemas.transaction import (
     FraudEvaluationResult,
@@ -35,6 +37,7 @@ class TransactionService:
         fraud_client: FraudEvaluationClient | None = None,
         kafka_producer: AIOKafkaProducer | None = None,
     ) -> None:
+        self._session = session
         self.repo = TransactionRepository(session)
         self.settings = settings
         self._fraud_client = fraud_client
@@ -102,17 +105,26 @@ class TransactionService:
             logger.warning("gRPC fraud evaluation failed for %s", txn.external_id, exc_info=True)
             return None
 
+    async def _resolve_account_number(self, account_id: str) -> str | None:
+        """Look up the account number for a given account ID."""
+        result = await self._session.execute(
+            select(Account.account_number).where(Account.id == account_id)
+        )
+        return result.scalar_one_or_none()
+
     async def _publish_to_kafka(self, txn) -> None:
         """Publish transaction event. Logs warning on failure."""
         if self._kafka_producer is None:
             return
         try:
+            account_number = await self._resolve_account_number(txn.account_id)
             await publish_transaction(
                 self._kafka_producer,
                 {
                     "external_id": txn.external_id,
                     "customer_id": txn.customer_id,
                     "account_id": txn.account_id,
+                    "account_number": account_number,
                     "amount": str(txn.amount),
                     "currency": txn.currency,
                     "transaction_type": txn.type,

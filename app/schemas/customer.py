@@ -76,6 +76,8 @@ class CustomerSummary(BaseModel):
     total_spend_30d: str
     avg_transaction_amount: str
     risk_rating: str
+    primary_account_number: str | None = None
+    primary_account_type: str | None = None
 
 
 class CustomerListResponse(PaginatedResponse):

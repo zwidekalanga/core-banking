@@ -3,6 +3,7 @@
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 
 from app.dependencies import get_account_repo, get_customer_repo, get_transaction_repo
 from app.main import app
@@ -143,6 +144,21 @@ class TestCustomersAPI:
         assert resp.status_code == 200
         body = resp.json()
         assert body["total"] == 1
+
+    async def test_create_customer_duplicate_returns_409(self, admin_client):
+        payload = make_customer_payload()
+        mock = AsyncMock()
+        mock.create = AsyncMock(
+            side_effect=IntegrityError(
+                "INSERT INTO customers",
+                {},
+                Exception("duplicate key value violates unique constraint"),
+            )
+        )
+        _override_repo(get_customer_repo, mock)
+        resp = await admin_client.post("/api/v1/customers", json=payload)
+        assert resp.status_code == 409
+        assert "already exists" in resp.json()["detail"]
 
     async def test_analyst_can_list_customers(self, analyst_client):
         mock = AsyncMock()

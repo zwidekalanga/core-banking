@@ -12,6 +12,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from slowapi.util import get_remote_address
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.api.v1.router import api_router
@@ -115,6 +116,21 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 
 def _register_exception_handlers(app: FastAPI) -> None:
+    @app.exception_handler(IntegrityError)
+    async def _integrity_error_handler(request: Request, exc: IntegrityError):
+        request_id = getattr(request.state, "request_id", "n/a")
+        logger.warning(
+            "Integrity constraint violation on %s %s (request_id=%s): %s",
+            request.method,
+            request.url.path,
+            request_id,
+            exc.orig,
+        )
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={"detail": "A record with this identifier already exists"},
+        )
+
     @app.exception_handler(Exception)
     async def _unhandled_exception_handler(request: Request, exc: Exception):
         request_id = getattr(request.state, "request_id", "n/a")
