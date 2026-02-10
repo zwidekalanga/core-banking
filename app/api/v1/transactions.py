@@ -1,7 +1,9 @@
 """Transaction API endpoints."""
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi_filter import FilterDepends
+from fastapi_pagination import Page
+from fastapi_pagination.ext.sqlalchemy import paginate as sqlalchemy_paginate
 
 from app.auth.dependencies import require_role
 from app.dependencies import AppSettings, DBSession, TransactionRepo
@@ -9,7 +11,6 @@ from app.filters.transaction import TransactionFilter
 from app.schemas.transaction import (
     TransactionCreate,
     TransactionCreateResponse,
-    TransactionListResponse,
     TransactionResponse,
 )
 from app.services.transaction_service import TransactionService
@@ -61,20 +62,13 @@ async def get_transaction(
 
 @router.get(
     "",
-    response_model=TransactionListResponse,
+    response_model=Page[TransactionResponse],
     dependencies=[Depends(require_role("admin", "analyst"))],
 )
 async def list_transactions(
     repo: TransactionRepo,
     filters: TransactionFilter = FilterDepends(TransactionFilter),
-    page: int = Query(1, ge=1),
-    size: int = Query(50, ge=1, le=100),
-) -> TransactionListResponse:
+):
     """List transactions with optional filtering and pagination."""
-    transactions, total = await repo.get_all(filters, page=page, size=size)
-    return TransactionListResponse.paginate(
-        items=[TransactionResponse.model_validate(t) for t in transactions],
-        total=total,
-        page=page,
-        size=size,
-    )
+    query = repo.get_list_query(filters)
+    return await sqlalchemy_paginate(repo.session, query)

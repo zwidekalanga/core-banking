@@ -1,11 +1,13 @@
 """Account API endpoints."""
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi_pagination import Page
+from fastapi_pagination.ext.sqlalchemy import paginate as sqlalchemy_paginate
 
 from app.auth.dependencies import require_role
 from app.dependencies import AccountRepo, TransactionRepo
 from app.schemas.account import AccountCreate, AccountResponse, AccountUpdate
-from app.schemas.transaction import TransactionListResponse, TransactionResponse
+from app.schemas.transaction import TransactionResponse
 from app.utils.audit import audit_logged
 
 router = APIRouter()
@@ -32,16 +34,14 @@ async def get_account(
 
 @router.get(
     "/{account_id}/transactions",
-    response_model=TransactionListResponse,
+    response_model=Page[TransactionResponse],
     dependencies=[Depends(require_role("admin", "analyst"))],
 )
 async def get_account_transactions(
     account_id: str,
     account_repo: AccountRepo,
     txn_repo: TransactionRepo,
-    page: int = Query(1, ge=1),
-    size: int = Query(50, ge=1, le=100),
-) -> TransactionListResponse:
+):
     """Get transactions for a specific account."""
     account = await account_repo.get_by_id(account_id)
     if not account:
@@ -50,13 +50,8 @@ async def get_account_transactions(
             detail="Account not found",
         )
 
-    transactions, total = await txn_repo.get_by_account(account_id, page=page, size=size)
-    return TransactionListResponse.paginate(
-        items=[TransactionResponse.model_validate(t) for t in transactions],
-        total=total,
-        page=page,
-        size=size,
-    )
+    query = txn_repo.get_by_account_query(account_id)
+    return await sqlalchemy_paginate(txn_repo.session, query)
 
 
 @router.post(

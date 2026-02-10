@@ -1,7 +1,9 @@
 """Customer API endpoints."""
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi_filter import FilterDepends
+from fastapi_pagination import Page
+from fastapi_pagination.ext.sqlalchemy import paginate as sqlalchemy_paginate
 
 from app.auth.dependencies import require_role
 from app.dependencies import AccountRepo, CustomerRepo, TransactionRepo
@@ -9,12 +11,11 @@ from app.filters.customer import CustomerFilter
 from app.schemas.account import AccountResponse
 from app.schemas.customer import (
     CustomerCreate,
-    CustomerListResponse,
     CustomerResponse,
     CustomerSummary,
     CustomerUpdate,
 )
-from app.schemas.transaction import TransactionListResponse, TransactionResponse
+from app.schemas.transaction import TransactionResponse
 from app.utils.audit import audit_logged
 
 router = APIRouter()
@@ -22,23 +23,16 @@ router = APIRouter()
 
 @router.get(
     "",
-    response_model=CustomerListResponse,
+    response_model=Page[CustomerResponse],
     dependencies=[Depends(require_role("admin", "analyst"))],
 )
 async def list_customers(
     repo: CustomerRepo,
     filters: CustomerFilter = FilterDepends(CustomerFilter),
-    page: int = Query(1, ge=1),
-    size: int = Query(50, ge=1, le=100),
-) -> CustomerListResponse:
+):
     """List customers with optional filtering and pagination."""
-    customers, total = await repo.get_all(filters, page=page, size=size)
-    return CustomerListResponse.paginate(
-        items=[CustomerResponse.model_validate(c) for c in customers],
-        total=total,
-        page=page,
-        size=size,
-    )
+    query = repo.get_list_query(filters)
+    return await sqlalchemy_paginate(repo.session, query)
 
 
 @router.get(
@@ -84,16 +78,14 @@ async def get_customer_accounts(
 
 @router.get(
     "/{customer_id}/transactions",
-    response_model=TransactionListResponse,
+    response_model=Page[TransactionResponse],
     dependencies=[Depends(require_role("admin", "analyst"))],
 )
 async def get_customer_transactions(
     customer_id: str,
     customer_repo: CustomerRepo,
     txn_repo: TransactionRepo,
-    page: int = Query(1, ge=1),
-    size: int = Query(50, ge=1, le=100),
-) -> TransactionListResponse:
+):
     """Get transaction history for a customer."""
     customer = await customer_repo.get_by_id(customer_id)
     if not customer:
@@ -102,13 +94,8 @@ async def get_customer_transactions(
             detail="Customer not found",
         )
 
-    transactions, total = await txn_repo.get_by_customer(customer_id, page=page, size=size)
-    return TransactionListResponse.paginate(
-        items=[TransactionResponse.model_validate(t) for t in transactions],
-        total=total,
-        page=page,
-        size=size,
-    )
+    query = txn_repo.get_by_customer_query(customer_id)
+    return await sqlalchemy_paginate(txn_repo.session, query)
 
 
 @router.get(

@@ -7,7 +7,6 @@ from ipaddress import IPv4Address, IPv6Address
 from pydantic import BaseModel, Field, field_serializer
 
 from app.models.transaction import Channel, TransactionType
-from app.schemas.common import PaginatedResponse
 
 
 class TransactionCreate(BaseModel):
@@ -74,9 +73,3 @@ class TransactionCreateResponse(TransactionResponse):
     """Response for transaction creation — includes fraud evaluation."""
 
     fraud_evaluation: FraudEvaluationResult | None = None
-
-
-class TransactionListResponse(PaginatedResponse):
-    """Paginated list of transactions."""
-
-    items: list[TransactionResponse]

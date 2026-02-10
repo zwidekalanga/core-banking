@@ -2,7 +2,7 @@
 
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 from fastapi import Depends, Request
 from redis.asyncio import Redis
@@ -140,9 +140,6 @@ def get_user_repo(db: DBSession) -> "UserRepository":
 
     return UserRepository(db)
 
-
-# Deferred imports for type annotations
-from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from app.repositories.account_repository import AccountRepository

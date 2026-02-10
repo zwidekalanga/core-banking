@@ -3,7 +3,7 @@
 import asyncio
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.filters.customer import CustomerFilter
@@ -19,22 +19,11 @@ class CustomerRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def get_all(
-        self,
-        filters: CustomerFilter,
-        page: int = 1,
-        size: int = 50,
-    ) -> tuple[list[Customer], int]:
+    def get_list_query(self, filters: CustomerFilter) -> Select:
+        """Return a filtered + sorted query — pagination handled by the library."""
         query = filters.filter(select(Customer))
-        count_query = filters.filter(select(func.count()).select_from(Customer))
-
-        total = (await self.session.execute(count_query)).scalar() or 0
-
         query = filters.sort(query)
-        query = query.offset((page - 1) * size).limit(size)
-
-        result = await self.session.execute(query)
-        return list(result.scalars().all()), total
+        return query
 
     async def get_by_id(self, customer_id: str) -> Customer | None:
         result = await self.session.execute(select(Customer).where(Customer.id == customer_id))
@@ -66,10 +55,12 @@ class CustomerRepository:
 
         thirty_days_ago = datetime.now(UTC) - timedelta(days=30)
 
-        # Run account count and transaction stats concurrently
-        account_result, txn_result = await asyncio.gather(
+        # Run account lookup and transaction stats concurrently (2 queries, not 3)
+        accounts_result, txn_result = await asyncio.gather(
             self.session.execute(
-                select(func.count()).select_from(Account).where(Account.customer_id == customer_id)
+                select(Account.account_number, Account.account_type)
+                .where(Account.customer_id == customer_id)
+                .order_by(Account.opened_at.asc())
             ),
             self.session.execute(
                 select(
@@ -82,7 +73,10 @@ class CustomerRepository:
             ),
         )
 
-        account_count = account_result.scalar() or 0
+        accounts = accounts_result.all()
+        account_count = len(accounts)
+        primary_account_number = accounts[0].account_number if accounts else None
+        primary_account_type = accounts[0].account_type if accounts else None
         txn_stats = txn_result.one()
 
         account_age_days = (
@@ -100,4 +94,6 @@ class CustomerRepository:
             total_spend_30d=f"{txn_stats[1]:.2f}",
             avg_transaction_amount=f"{txn_stats[2]:.2f}",
             risk_rating=customer.risk_rating,
+            primary_account_number=primary_account_number,
+            primary_account_type=primary_account_type,
         )

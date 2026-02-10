@@ -87,45 +87,22 @@ class TestCustomerRepository:
 
         assert result is None
 
-    @pytest.mark.asyncio
-    async def test_get_all_returns_items_and_total(self):
+    def test_get_list_query_returns_select(self):
         session = _make_session()
-        customers = [SimpleNamespace(id="c1"), SimpleNamespace(id="c2")]
-
-        # First execute -> count query, second -> data query
-        session.execute.side_effect = [_scalar(2), _scalars_all(customers)]
-
         repo = CustomerRepository(session)
         filters = CustomerFilter()
-        items, total = await repo.get_all(filters, page=1, size=50)
+        query = repo.get_list_query(filters)
+        assert query is not None
+        compiled = str(query.compile(compile_kwargs={"literal_binds": True}))
+        assert "customer" in compiled.lower()
 
-        assert total == 2
-        assert len(items) == 2
-        assert session.execute.await_count == 2
-
-    @pytest.mark.asyncio
-    async def test_get_all_pagination_offset(self):
+    def test_get_list_query_with_filters(self):
         session = _make_session()
-        session.execute.side_effect = [_scalar(10), _scalars_all([])]
-
-        repo = CustomerRepository(session)
-        filters = CustomerFilter()
-        await repo.get_all(filters, page=3, size=5)
-
-        # Just verify it ran without error — offset/limit applied to query
-        assert session.execute.await_count == 2
-
-    @pytest.mark.asyncio
-    async def test_get_all_with_filters(self):
-        session = _make_session()
-        session.execute.side_effect = [_scalar(1), _scalars_all([SimpleNamespace(id="c1")])]
-
         repo = CustomerRepository(session)
         filters = CustomerFilter(status="active", tier="premium")
-        items, total = await repo.get_all(filters, page=1, size=50)
-
-        assert total == 1
-        assert len(items) == 1
+        query = repo.get_list_query(filters)
+        compiled = str(query.compile(compile_kwargs={"literal_binds": True}))
+        assert "WHERE" in compiled
 
     @pytest.mark.asyncio
     async def test_create_adds_and_flushes(self):
@@ -197,14 +174,19 @@ class TestCustomerRepository:
             onboarded_at=_NOW,
         )
 
-        # execute calls: get_by_id, account count, txn stats
-        account_count_result = _scalar(3)
+        # execute calls: get_by_id, accounts query (.all()), txn stats (.one())
+        accounts_result = MagicMock()
+        accounts_result.all.return_value = [
+            SimpleNamespace(account_number="1012345678", account_type="cheque"),
+            SimpleNamespace(account_number="1012345679", account_type="savings"),
+            SimpleNamespace(account_number="1012345680", account_type="credit"),
+        ]
         txn_stats_result = MagicMock()
         txn_stats_result.one.return_value = (15, Decimal("7500.00"), Decimal("500.00"))
 
         session.execute.side_effect = [
             _scalar_one_or_none(customer),  # get_by_id
-            account_count_result,  # account count
+            accounts_result,  # accounts query
             txn_stats_result,  # txn stats
         ]
 
@@ -215,6 +197,8 @@ class TestCustomerRepository:
         assert summary.customer_id == "c1"
         assert summary.full_name == "Alice Smith"
         assert summary.total_accounts == 3
+        assert summary.primary_account_number == "1012345678"
+        assert summary.primary_account_type == "cheque"
         assert summary.total_transactions_30d == 15
         assert summary.total_spend_30d == "7500.00"
         assert summary.avg_transaction_amount == "500.00"
@@ -343,54 +327,38 @@ class TestTransactionRepository:
 
         assert result is None
 
-    @pytest.mark.asyncio
-    async def test_get_all_returns_items_and_total(self):
+    def test_get_list_query_returns_select(self):
         session = _make_session()
-        txns = [SimpleNamespace(id="t1"), SimpleNamespace(id="t2"), SimpleNamespace(id="t3")]
-        session.execute.side_effect = [_scalar(3), _scalars_all(txns)]
-
         repo = TransactionRepository(session)
         filters = TransactionFilter()
-        items, total = await repo.get_all(filters, page=1, size=50)
+        query = repo.get_list_query(filters)
+        assert query is not None
+        compiled = str(query.compile(compile_kwargs={"literal_binds": True}))
+        assert "transaction" in compiled.lower()
 
-        assert total == 3
-        assert len(items) == 3
-
-    @pytest.mark.asyncio
-    async def test_get_all_with_filters(self):
+    def test_get_list_query_with_filters(self):
         session = _make_session()
-        session.execute.side_effect = [_scalar(1), _scalars_all([SimpleNamespace(id="t1")])]
-
         repo = TransactionRepository(session)
         filters = TransactionFilter(type="purchase", channel="online")
-        items, total = await repo.get_all(filters, page=1, size=50)
+        query = repo.get_list_query(filters)
+        compiled = str(query.compile(compile_kwargs={"literal_binds": True}))
+        assert "WHERE" in compiled
 
-        assert total == 1
-        assert len(items) == 1
-
-    @pytest.mark.asyncio
-    async def test_get_by_customer_delegates_to_get_all(self):
+    def test_get_by_customer_query_returns_select(self):
         session = _make_session()
-        txns = [SimpleNamespace(id="t1")]
-        session.execute.side_effect = [_scalar(1), _scalars_all(txns)]
-
         repo = TransactionRepository(session)
-        items, total = await repo.get_by_customer("cust-1", page=1, size=10)
+        query = repo.get_by_customer_query("cust-1")
+        assert query is not None
+        compiled = str(query.compile(compile_kwargs={"literal_binds": True}))
+        assert "transaction" in compiled.lower()
 
-        assert total == 1
-        assert len(items) == 1
-
-    @pytest.mark.asyncio
-    async def test_get_by_account_delegates_to_get_all(self):
+    def test_get_by_account_query_returns_select(self):
         session = _make_session()
-        txns = [SimpleNamespace(id="t1"), SimpleNamespace(id="t2")]
-        session.execute.side_effect = [_scalar(2), _scalars_all(txns)]
-
         repo = TransactionRepository(session)
-        items, total = await repo.get_by_account("acc-1", page=1, size=10)
-
-        assert total == 2
-        assert len(items) == 2
+        query = repo.get_by_account_query("acc-1")
+        assert query is not None
+        compiled = str(query.compile(compile_kwargs={"literal_binds": True}))
+        assert "transaction" in compiled.lower()
 
     @pytest.mark.asyncio
     async def test_create_adds_and_flushes(self):
@@ -414,18 +382,6 @@ class TestTransactionRepository:
         session.add.assert_called_once()
         session.flush.assert_awaited_once()
         session.refresh.assert_awaited_once()
-
-    @pytest.mark.asyncio
-    async def test_get_all_empty_result(self):
-        session = _make_session()
-        session.execute.side_effect = [_scalar(0), _scalars_all([])]
-
-        repo = TransactionRepository(session)
-        filters = TransactionFilter()
-        items, total = await repo.get_all(filters, page=1, size=50)
-
-        assert total == 0
-        assert items == []
 
 
 # =========================================================================

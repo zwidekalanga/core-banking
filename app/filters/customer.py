@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
-from fastapi_filter.contrib.sqlalchemy import Filter
-
+from app.filters.base import Filter
 from app.models.customer import Customer
 
 
@@ -19,9 +16,9 @@ class CustomerFilter(Filter):
         ?order_by=created_at
     """
 
-    status: Optional[str] = None
-    tier: Optional[str] = None
-    order_by: Optional[list[str]] = None
+    status: str | None = None
+    tier: str | None = None
+    order_by: list[str] | None = None
 
     class Constants(Filter.Constants):
         model = Customer

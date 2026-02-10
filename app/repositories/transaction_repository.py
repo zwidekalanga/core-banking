@@ -1,6 +1,6 @@
 """Repository for transaction data access."""
 
-from sqlalchemy import func, select
+from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.filters.transaction import TransactionFilter
@@ -18,34 +18,21 @@ class TransactionRepository:
         result = await self.session.execute(select(Transaction).where(Transaction.id == txn_id))
         return result.scalar_one_or_none()
 
-    async def get_all(
-        self,
-        filters: TransactionFilter,
-        page: int = 1,
-        size: int = 50,
-    ) -> tuple[list[Transaction], int]:
+    def get_list_query(self, filters: TransactionFilter) -> Select:
+        """Return a filtered + sorted query — pagination handled by the library."""
         query = filters.filter(select(Transaction))
-        count_query = filters.filter(select(func.count()).select_from(Transaction))
-
-        total = (await self.session.execute(count_query)).scalar() or 0
-
         query = filters.sort(query)
-        query = query.offset((page - 1) * size).limit(size)
+        return query
 
-        result = await self.session.execute(query)
-        return list(result.scalars().all()), total
-
-    async def get_by_customer(
-        self, customer_id: str, page: int = 1, size: int = 50
-    ) -> tuple[list[Transaction], int]:
+    def get_by_customer_query(self, customer_id: str) -> Select:
+        """Return a query for transactions belonging to a customer."""
         filters = TransactionFilter(customer_id=customer_id)
-        return await self.get_all(filters, page=page, size=size)
+        return self.get_list_query(filters)
 
-    async def get_by_account(
-        self, account_id: str, page: int = 1, size: int = 50
-    ) -> tuple[list[Transaction], int]:
+    def get_by_account_query(self, account_id: str) -> Select:
+        """Return a query for transactions belonging to an account."""
         filters = TransactionFilter(account_id=account_id)
-        return await self.get_all(filters, page=page, size=size)
+        return self.get_list_query(filters)
 
     async def create(self, data: TransactionCreate) -> Transaction:
         txn = Transaction(**data.model_dump())

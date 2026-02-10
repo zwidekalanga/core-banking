@@ -5,7 +5,6 @@ from datetime import date, datetime
 from pydantic import BaseModel, EmailStr, Field
 
 from app.models.customer import CustomerStatus, CustomerTier, KYCStatus, RiskRating
-from app.schemas.common import PaginatedResponse
 
 
 class CustomerCreate(BaseModel):
@@ -76,9 +75,5 @@ class CustomerSummary(BaseModel):
     total_spend_30d: str
     avg_transaction_amount: str
     risk_rating: str
-
-
-class CustomerListResponse(PaginatedResponse):
-    """Paginated list of customers."""
-
-    items: list[CustomerResponse]
+    primary_account_number: str | None = None
+    primary_account_type: str | None = None

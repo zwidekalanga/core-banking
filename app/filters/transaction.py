@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
 
-from fastapi_filter.contrib.sqlalchemy import Filter
-
+from app.filters.base import Filter
 from app.models.transaction import Transaction
 
 
@@ -24,13 +22,13 @@ class TransactionFilter(Filter):
         ?order_by=-created_at
     """
 
-    customer_id: Optional[str] = None
-    account_id: Optional[str] = None
-    type: Optional[str] = None
-    channel: Optional[str] = None
-    created_at__gte: Optional[datetime] = None
-    created_at__lte: Optional[datetime] = None
-    order_by: Optional[list[str]] = None
+    customer_id: str | None = None
+    account_id: str | None = None
+    type: str | None = None
+    channel: str | None = None
+    created_at__gte: datetime | None = None
+    created_at__lte: datetime | None = None
+    order_by: list[str] | None = None
 
     class Constants(Filter.Constants):
         model = Transaction

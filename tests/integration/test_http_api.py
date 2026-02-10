@@ -1,8 +1,10 @@
 """Integration tests for customer, account, and transaction API endpoints."""
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastapi_pagination import Page
+from sqlalchemy.exc import IntegrityError
 
 from app.dependencies import get_account_repo, get_customer_repo, get_transaction_repo
 from app.main import app
@@ -22,6 +24,14 @@ def _override_repo(dep_fn, mock_repo):
     return mock_repo
 
 
+def _make_page(items, total=None, page=1, size=50):
+    """Build a Page object matching fastapi-pagination's output."""
+    if total is None:
+        total = len(items)
+    pages = (total + size - 1) // size if size > 0 else 0
+    return Page(items=items, total=total, page=page, size=size, pages=pages)
+
+
 @pytest.fixture(autouse=True)
 def _clear_overrides():
     """Clear dependency overrides after each test."""
@@ -36,10 +46,13 @@ def _clear_overrides():
 
 @pytest.mark.asyncio
 class TestCustomersAPI:
-    async def test_list_customers(self, admin_client):
+    @patch("app.api.v1.customers.sqlalchemy_paginate", new_callable=AsyncMock)
+    async def test_list_customers(self, mock_paginate, admin_client):
         customers = [make_customer_model(), make_customer_model()]
-        mock = AsyncMock()
-        mock.get_all = AsyncMock(return_value=(customers, 2))
+        mock_paginate.return_value = _make_page(customers, total=2)
+        mock = MagicMock()
+        mock.get_list_query = MagicMock(return_value=MagicMock())
+        mock.session = MagicMock()
         _override_repo(get_customer_repo, mock)
         resp = await admin_client.get("/api/v1/customers")
         assert resp.status_code == 200
@@ -47,18 +60,24 @@ class TestCustomersAPI:
         assert body["total"] == 2
         assert len(body["items"]) == 2
 
-    async def test_list_customers_with_filters(self, admin_client):
+    @patch("app.api.v1.customers.sqlalchemy_paginate", new_callable=AsyncMock)
+    async def test_list_customers_with_filters(self, mock_paginate, admin_client):
         customers = [make_customer_model(status="active", tier="premium")]
-        mock = AsyncMock()
-        mock.get_all = AsyncMock(return_value=(customers, 1))
+        mock_paginate.return_value = _make_page(customers, total=1)
+        mock = MagicMock()
+        mock.get_list_query = MagicMock(return_value=MagicMock())
+        mock.session = MagicMock()
         _override_repo(get_customer_repo, mock)
         resp = await admin_client.get("/api/v1/customers?status=active&tier=premium")
         assert resp.status_code == 200
         assert resp.json()["total"] == 1
 
-    async def test_list_customers_pagination(self, admin_client):
-        mock = AsyncMock()
-        mock.get_all = AsyncMock(return_value=([], 0))
+    @patch("app.api.v1.customers.sqlalchemy_paginate", new_callable=AsyncMock)
+    async def test_list_customers_pagination(self, mock_paginate, admin_client):
+        mock_paginate.return_value = _make_page([], total=0, page=2, size=10)
+        mock = MagicMock()
+        mock.get_list_query = MagicMock(return_value=MagicMock())
+        mock.session = MagicMock()
         _override_repo(get_customer_repo, mock)
         resp = await admin_client.get("/api/v1/customers?page=2&size=10")
         assert resp.status_code == 200
@@ -127,16 +146,19 @@ class TestCustomersAPI:
         assert resp.status_code == 200
         assert len(resp.json()) == 1
 
-    async def test_get_customer_transactions(self, admin_client):
+    @patch("app.api.v1.customers.sqlalchemy_paginate", new_callable=AsyncMock)
+    async def test_get_customer_transactions(self, mock_paginate, admin_client):
         customer = make_customer_model()
         txns = [make_transaction_model(customer_id=customer.id)]
+        mock_paginate.return_value = _make_page(txns, total=1)
 
         cust_mock = AsyncMock()
         cust_mock.get_by_id = AsyncMock(return_value=customer)
         _override_repo(get_customer_repo, cust_mock)
 
-        txn_mock = AsyncMock()
-        txn_mock.get_by_customer = AsyncMock(return_value=(txns, 1))
+        txn_mock = MagicMock()
+        txn_mock.get_by_customer_query = MagicMock(return_value=MagicMock())
+        txn_mock.session = MagicMock()
         _override_repo(get_transaction_repo, txn_mock)
 
         resp = await admin_client.get(f"/api/v1/customers/{customer.id}/transactions")
@@ -144,9 +166,27 @@ class TestCustomersAPI:
         body = resp.json()
         assert body["total"] == 1
 
-    async def test_analyst_can_list_customers(self, analyst_client):
+    async def test_create_customer_duplicate_returns_409(self, admin_client):
+        payload = make_customer_payload()
         mock = AsyncMock()
-        mock.get_all = AsyncMock(return_value=([], 0))
+        mock.create = AsyncMock(
+            side_effect=IntegrityError(
+                "INSERT INTO customers",
+                {},
+                Exception("duplicate key value violates unique constraint"),
+            )
+        )
+        _override_repo(get_customer_repo, mock)
+        resp = await admin_client.post("/api/v1/customers", json=payload)
+        assert resp.status_code == 409
+        assert "already exists" in resp.json()["detail"]
+
+    @patch("app.api.v1.customers.sqlalchemy_paginate", new_callable=AsyncMock)
+    async def test_analyst_can_list_customers(self, mock_paginate, analyst_client):
+        mock_paginate.return_value = _make_page([], total=0)
+        mock = MagicMock()
+        mock.get_list_query = MagicMock(return_value=MagicMock())
+        mock.session = MagicMock()
         _override_repo(get_customer_repo, mock)
         resp = await analyst_client.get("/api/v1/customers")
         assert resp.status_code == 200
@@ -196,16 +236,19 @@ class TestAccountsAPI:
         assert resp.status_code == 200
         assert resp.json()["status"] == "frozen"
 
-    async def test_get_account_transactions(self, admin_client):
+    @patch("app.api.v1.accounts.sqlalchemy_paginate", new_callable=AsyncMock)
+    async def test_get_account_transactions(self, mock_paginate, admin_client):
         account = make_account_model()
         txns = [make_transaction_model(account_id=account.id)]
+        mock_paginate.return_value = _make_page(txns, total=1)
 
         acc_mock = AsyncMock()
         acc_mock.get_by_id = AsyncMock(return_value=account)
         _override_repo(get_account_repo, acc_mock)
 
-        txn_mock = AsyncMock()
-        txn_mock.get_by_account = AsyncMock(return_value=(txns, 1))
+        txn_mock = MagicMock()
+        txn_mock.get_by_account_query = MagicMock(return_value=MagicMock())
+        txn_mock.session = MagicMock()
         _override_repo(get_transaction_repo, txn_mock)
 
         resp = await admin_client.get(f"/api/v1/accounts/{account.id}/transactions")
@@ -220,20 +263,26 @@ class TestAccountsAPI:
 
 @pytest.mark.asyncio
 class TestTransactionsAPI:
-    async def test_list_transactions(self, admin_client):
+    @patch("app.api.v1.transactions.sqlalchemy_paginate", new_callable=AsyncMock)
+    async def test_list_transactions(self, mock_paginate, admin_client):
         txns = [make_transaction_model(), make_transaction_model()]
-        mock = AsyncMock()
-        mock.get_all = AsyncMock(return_value=(txns, 2))
+        mock_paginate.return_value = _make_page(txns, total=2)
+        mock = MagicMock()
+        mock.get_list_query = MagicMock(return_value=MagicMock())
+        mock.session = MagicMock()
         _override_repo(get_transaction_repo, mock)
         resp = await admin_client.get("/api/v1/transactions")
         assert resp.status_code == 200
         body = resp.json()
         assert body["total"] == 2
 
-    async def test_list_transactions_with_filters(self, admin_client):
+    @patch("app.api.v1.transactions.sqlalchemy_paginate", new_callable=AsyncMock)
+    async def test_list_transactions_with_filters(self, mock_paginate, admin_client):
         txns = [make_transaction_model(type="purchase")]
-        mock = AsyncMock()
-        mock.get_all = AsyncMock(return_value=(txns, 1))
+        mock_paginate.return_value = _make_page(txns, total=1)
+        mock = MagicMock()
+        mock.get_list_query = MagicMock(return_value=MagicMock())
+        mock.session = MagicMock()
         _override_repo(get_transaction_repo, mock)
         resp = await admin_client.get("/api/v1/transactions?type=purchase&channel=online")
         assert resp.status_code == 200
@@ -266,9 +315,12 @@ class TestTransactionsAPI:
         assert resp.status_code == 201
         assert resp.json()["external_id"] == payload["external_id"]
 
-    async def test_analyst_can_read_transactions(self, analyst_client):
-        mock = AsyncMock()
-        mock.get_all = AsyncMock(return_value=([], 0))
+    @patch("app.api.v1.transactions.sqlalchemy_paginate", new_callable=AsyncMock)
+    async def test_analyst_can_read_transactions(self, mock_paginate, analyst_client):
+        mock_paginate.return_value = _make_page([], total=0)
+        mock = MagicMock()
+        mock.get_list_query = MagicMock(return_value=MagicMock())
+        mock.session = MagicMock()
         _override_repo(get_transaction_repo, mock)
         resp = await analyst_client.get("/api/v1/transactions")
         assert resp.status_code == 200
