@@ -1,10 +1,12 @@
 """Repository for customer data access."""
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.filters.customer import CustomerFilter
 from app.models.account import Account
 from app.models.customer import Customer
 from app.models.transaction import Transaction
@@ -19,24 +21,16 @@ class CustomerRepository:
 
     async def get_all(
         self,
-        status: str | None = None,
-        tier: str | None = None,
+        filters: CustomerFilter,
         page: int = 1,
         size: int = 50,
     ) -> tuple[list[Customer], int]:
-        query = select(Customer)
-        count_query = select(func.count()).select_from(Customer)
-
-        if status:
-            query = query.where(Customer.status == status)
-            count_query = count_query.where(Customer.status == status)
-        if tier:
-            query = query.where(Customer.tier == tier)
-            count_query = count_query.where(Customer.tier == tier)
+        query = filters.filter(select(Customer))
+        count_query = filters.filter(select(func.count()).select_from(Customer))
 
         total = (await self.session.execute(count_query)).scalar() or 0
 
-        query = query.order_by(Customer.created_at.desc())
+        query = filters.sort(query)
         query = query.offset((page - 1) * size).limit(size)
 
         result = await self.session.execute(query)
@@ -49,7 +43,7 @@ class CustomerRepository:
     async def create(self, data: CustomerCreate) -> Customer:
         customer = Customer(**data.model_dump())
         self.session.add(customer)
-        await self.session.commit()
+        await self.session.flush()
         await self.session.refresh(customer)
         return customer
 
@@ -61,7 +55,7 @@ class CustomerRepository:
         for field, value in data.model_dump(exclude_unset=True).items():
             setattr(customer, field, value)
 
-        await self.session.commit()
+        await self.session.flush()
         await self.session.refresh(customer)
         return customer
 
@@ -70,18 +64,14 @@ class CustomerRepository:
         if not customer:
             return None
 
-        # Count accounts
-        account_count = (
-            await self.session.execute(
-                select(func.count()).select_from(Account).where(Account.customer_id == customer_id)
-            )
-        ).scalar() or 0
-
-        # Transaction stats (last 30 days)
         thirty_days_ago = datetime.now(UTC) - timedelta(days=30)
 
-        txn_stats = (
-            await self.session.execute(
+        # Run account count and transaction stats concurrently
+        account_result, txn_result = await asyncio.gather(
+            self.session.execute(
+                select(func.count()).select_from(Account).where(Account.customer_id == customer_id)
+            ),
+            self.session.execute(
                 select(
                     func.count().label("count"),
                     func.coalesce(func.sum(Transaction.amount), 0).label("total"),
@@ -89,10 +79,15 @@ class CustomerRepository:
                 )
                 .where(Transaction.customer_id == customer_id)
                 .where(Transaction.created_at >= thirty_days_ago)
-            )
-        ).one()
+            ),
+        )
 
-        account_age_days = (datetime.now(UTC) - customer.onboarded_at).days
+        account_count = account_result.scalar() or 0
+        txn_stats = txn_result.one()
+
+        account_age_days = (
+            (datetime.now(UTC) - customer.onboarded_at).days if customer.onboarded_at else 0
+        )
 
         return CustomerSummary(
             customer_id=customer.id,

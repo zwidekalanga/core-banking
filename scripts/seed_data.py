@@ -6,10 +6,10 @@ Run: python -m scripts.seed_data
 
 import asyncio
 import logging
+import random
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
-from random import choice, randint, uniform
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -153,7 +153,7 @@ async def seed_admin_users(session: AsyncSession) -> None:
             select(AdminUser).where(AdminUser.username == user_data["username"])
         )
         if existing.scalar_one_or_none():
-            logger.info(f"Admin user '{user_data['username']}' already exists, skipping")
+            logger.info("Admin user '%s' already exists, skipping", user_data["username"])
             continue
 
         user = AdminUser(
@@ -166,7 +166,7 @@ async def seed_admin_users(session: AsyncSession) -> None:
             is_active=True,
         )
         session.add(user)
-        logger.info(f"Created admin user: {user_data['username']}")
+        logger.info("Created admin user: %s", user_data["username"])
 
     await session.commit()
 
@@ -180,7 +180,7 @@ async def seed_customers_and_accounts(session: AsyncSession) -> list[tuple[str, 
             select(Customer).where(Customer.external_id == cust_data["external_id"])
         )
         if existing.scalar_one_or_none():
-            logger.info(f"Customer '{cust_data['external_id']}' already exists, skipping")
+            logger.info("Customer '%s' already exists, skipping", cust_data["external_id"])
             # Still need to fetch IDs for transactions
             customer = (
                 await session.execute(
@@ -201,17 +201,17 @@ async def seed_customers_and_accounts(session: AsyncSession) -> list[tuple[str, 
 
         # Create 1-3 accounts per customer
         account_ids = []
-        num_accounts = randint(1, 3)
+        num_accounts = random.randint(1, 3)
         for i in range(num_accounts):
             account_id = str(uuid.uuid4())
             acct_type = ACCOUNT_TYPES[i % len(ACCOUNT_TYPES)]
             account = Account(
                 id=account_id,
                 customer_id=customer_id,
-                account_number=f"100{randint(1000000, 9999999)}",
+                account_number=f"100{random.randint(1000000, 9999999)}",
                 account_type=acct_type,
                 currency="ZAR",
-                balance=Decimal(str(round(uniform(1000, 500000), 2))),
+                balance=Decimal(str(round(random.uniform(1000, 500000), 2))),
                 status="active",
                 opened_at=cust_data["onboarded_at"],
             )
@@ -219,7 +219,9 @@ async def seed_customers_and_accounts(session: AsyncSession) -> list[tuple[str, 
             account_ids.append(account_id)
 
         customer_accounts.append((customer_id, account_ids))
-        logger.info(f"Created customer {cust_data['external_id']} with {num_accounts} account(s)")
+        logger.info(
+            "Created customer %s with %d account(s)", cust_data["external_id"], num_accounts
+        )
 
     await session.commit()
     return customer_accounts
@@ -237,26 +239,28 @@ async def seed_transactions(
             continue
 
         # 10-30 transactions per customer over last 60 days
-        num_txns = randint(10, 30)
+        num_txns = random.randint(10, 30)
         for _ in range(num_txns):
-            account_id = choice(account_ids)
-            merchant_name, merchant_category = choice(MERCHANTS)
-            days_ago = randint(0, 60)
-            txn_time = now - timedelta(days=days_ago, hours=randint(0, 23), minutes=randint(0, 59))
+            account_id = random.choice(account_ids)
+            merchant_name, merchant_category = random.choice(MERCHANTS)
+            days_ago = random.randint(0, 60)
+            txn_time = now - timedelta(
+                days=days_ago, hours=random.randint(0, 23), minutes=random.randint(0, 59)
+            )
 
             txn = Transaction(
                 id=str(uuid.uuid4()),
                 external_id=f"TXN-{uuid.uuid4().hex[:8].upper()}",
                 account_id=account_id,
                 customer_id=customer_id,
-                type=choice(TXN_TYPES),
-                amount=Decimal(str(round(uniform(10, 25000), 2))),
+                type=random.choice(TXN_TYPES),
+                amount=Decimal(str(round(random.uniform(10, 25000), 2))),
                 currency="ZAR",
                 merchant_name=merchant_name,
                 merchant_category=merchant_category,
-                channel=choice(CHANNELS),
+                channel=random.choice(CHANNELS),
                 country_code="ZA",
-                ip_address=f"41.{randint(0, 255)}.{randint(0, 255)}.{randint(0, 255)}",
+                ip_address=f"41.{random.randint(0, 255)}.{random.randint(0, 255)}.{random.randint(0, 255)}",
                 device_id=f"device-{uuid.uuid4().hex[:6]}",
                 status="completed",
                 description=f"Payment to {merchant_name}",
@@ -267,12 +271,13 @@ async def seed_transactions(
             txn_count += 1
 
     await session.commit()
-    logger.info(f"Created {txn_count} transactions")
+    logger.info("Created %d transactions", txn_count)
 
 
 async def main() -> None:
     """Run all seed scripts."""
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+    random.seed(42)  # Reproducible demo data
 
     settings = get_settings()
     engine = create_async_engine(str(settings.database_url))

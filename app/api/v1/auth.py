@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
+from jose import JWTError
 
 from app.auth.dependencies import CurrentUser
 from app.auth.security import (
@@ -11,8 +12,7 @@ from app.auth.security import (
     verify_password,
 )
 from app.config import get_settings
-from app.dependencies import DBSession
-from app.repositories.user_repository import UserRepository
+from app.dependencies import UserRepo
 from app.schemas.auth import RefreshRequest, TokenResponse, UserResponse
 
 router = APIRouter()
@@ -20,11 +20,10 @@ router = APIRouter()
 
 @router.post("/login", response_model=TokenResponse)
 async def login(
-    db: DBSession,
+    repo: UserRepo,
     form_data: OAuth2PasswordRequestForm = Depends(),  # pyright: ignore[reportCallInDefaultInitializer]
 ) -> TokenResponse:
     """Authenticate admin user and return JWT tokens."""
-    repo = UserRepository(db)
     user = await repo.get_by_username(form_data.username)
 
     if not user or not verify_password(form_data.password, user.hashed_password):
@@ -55,12 +54,12 @@ async def login(
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh_token(
     body: RefreshRequest,
-    db: DBSession,
+    repo: UserRepo,
 ) -> TokenResponse:
     """Exchange a refresh token for a new access token."""
     try:
         payload = decode_token(body.refresh_token)
-    except Exception as err:
+    except JWTError as err:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired refresh token",
@@ -78,7 +77,6 @@ async def refresh_token(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token: missing subject",
         )
-    repo = UserRepository(db)
     user = await repo.get_by_id(user_id)
 
     if not user or not user.is_active:

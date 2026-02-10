@@ -1,22 +1,18 @@
 """Async gRPC client for calling the Fraud Evaluation service."""
 
-import logging
-
 import grpc.aio
 
 from app.grpc.generated import fraud_evaluation_pb2, fraud_evaluation_pb2_grpc
+from app.utils.logging import get_logger
 
-logger = logging.getLogger(__name__)
-
-# Default target — overridden by FRAUD_GRPC_TARGET env var in Docker
-DEFAULT_TARGET = "fraud-inbound-grpc:50051"
+logger = get_logger(__name__)
 
 
 class FraudEvaluationClient:
     """Async wrapper around the gRPC FraudEvaluationService stub."""
 
-    def __init__(self, target: str | None = None):
-        self._target = target or DEFAULT_TARGET
+    def __init__(self, target: str):
+        self._target = target
         self._channel: grpc.aio.Channel | None = None
         self._stub: fraud_evaluation_pb2_grpc.FraudEvaluationServiceStub | None = None
 
@@ -66,18 +62,3 @@ class FraudEvaluationClient:
             await self._channel.close()
             self._channel = None
             self._stub = None
-
-
-# Module-level singleton
-_client: FraudEvaluationClient | None = None
-
-
-def get_fraud_client() -> FraudEvaluationClient:
-    """Get or create the singleton fraud evaluation gRPC client."""
-    global _client
-    if _client is None:
-        import os
-
-        target = os.environ.get("FRAUD_GRPC_TARGET", DEFAULT_TARGET)
-        _client = FraudEvaluationClient(target=target)
-    return _client

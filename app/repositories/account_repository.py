@@ -28,7 +28,7 @@ class AccountRepository:
     async def create(self, data: AccountCreate) -> Account:
         account = Account(**data.model_dump())
         self.session.add(account)
-        await self.session.commit()
+        await self.session.flush()
         await self.session.refresh(account)
         return account
 
@@ -40,6 +40,6 @@ class AccountRepository:
         for field, value in data.model_dump(exclude_unset=True).items():
             setattr(account, field, value)
 
-        await self.session.commit()
+        await self.session.flush()
         await self.session.refresh(account)
         return account

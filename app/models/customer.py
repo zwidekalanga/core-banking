@@ -42,9 +42,9 @@ class Customer(UUIDMixin, TimestampMixin, Base):
     external_id: Mapped[str] = mapped_column(String(100), unique=True, index=True, nullable=False)
     first_name: Mapped[str] = mapped_column(String(100), nullable=False)
     last_name: Mapped[str] = mapped_column(String(100), nullable=False)
-    email: Mapped[str] = mapped_column(String(255), nullable=False)
+    email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     phone: Mapped[str] = mapped_column(String(20), nullable=False)
-    id_number: Mapped[str] = mapped_column(String(20), nullable=False)
+    id_number: Mapped[str] = mapped_column(String(20), unique=True, nullable=False)
     date_of_birth: Mapped[date] = mapped_column(Date, nullable=False)
     kyc_status: Mapped[str] = mapped_column(
         String(20), nullable=False, default=KYCStatus.pending.value
@@ -61,9 +61,11 @@ class Customer(UUIDMixin, TimestampMixin, Base):
     )
     onboarded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
-    accounts = relationship("Account", back_populates="customer", lazy="selectin")
+    accounts = relationship("Account", back_populates="customer", lazy="raise")
 
     __table_args__ = (
         Index("idx_customer_status", "status"),
         Index("idx_customer_tier", "tier"),
+        Index("idx_customer_email", "email", unique=True),
+        Index("idx_customer_id_number", "id_number", unique=True),
     )

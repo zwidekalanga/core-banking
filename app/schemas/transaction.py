@@ -6,6 +6,7 @@ from ipaddress import IPv4Address, IPv6Address
 
 from pydantic import BaseModel, Field, field_serializer
 
+from app.models.transaction import Channel, TransactionType
 from app.schemas.common import PaginatedResponse
 
 
@@ -15,12 +16,12 @@ class TransactionCreate(BaseModel):
     external_id: str = Field(min_length=1, max_length=100)
     account_id: str
     customer_id: str
-    type: str
+    type: TransactionType
     amount: Decimal = Field(gt=0)
     currency: str = "ZAR"
     merchant_name: str | None = None
     merchant_category: str | None = None
-    channel: str
+    channel: Channel
     country_code: str = "ZA"
     ip_address: str | None = None
     device_id: str | None = None

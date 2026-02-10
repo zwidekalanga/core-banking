@@ -3,7 +3,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -62,6 +62,36 @@ class Settings(BaseSettings):
             v = v.replace("postgresql://", "postgresql+asyncpg://")
         return v
 
+    @model_validator(mode="after")
+    def enforce_jwt_secret_strength(self) -> "Settings":
+        """Enforce JWT secret requirements based on environment.
+
+        - Non-dev: reject the placeholder secret AND require >= 32 characters.
+        - Dev: emit a warning for short secrets so local runs aren't blocked.
+        """
+        if self.environment != "development":
+            if self.jwt_secret_key == "CHANGE-ME-IN-PRODUCTION":
+                raise ValueError(
+                    "jwt_secret_key must be changed from its default value "
+                    "in staging/production environments"
+                )
+            if len(self.jwt_secret_key) < 32:
+                raise ValueError(
+                    "jwt_secret_key must be at least 32 characters "
+                    "in staging/production environments"
+                )
+        else:
+            if len(self.jwt_secret_key) < 32:
+                import warnings
+
+                warnings.warn(
+                    "jwt_secret_key is shorter than 32 characters — "
+                    "use a strong, randomly-generated secret in production",
+                    UserWarning,
+                    stacklevel=2,
+                )
+        return self
+
     @property
     def is_development(self) -> bool:
         return self.environment == "development"
@@ -73,5 +103,11 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    """Get cached settings instance."""
+    """Get cached settings instance.
+
+    The ``@lru_cache`` decorator ensures a single ``Settings`` object is
+    created for the lifetime of the process (env vars are read once at
+    first call).  In tests, call ``get_settings.cache_clear()`` between
+    runs to pick up overridden environment variables.
+    """
     return Settings()

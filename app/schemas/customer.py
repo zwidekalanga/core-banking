@@ -2,8 +2,9 @@
 
 from datetime import date, datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 
+from app.models.customer import CustomerStatus, CustomerTier, KYCStatus, RiskRating
 from app.schemas.common import PaginatedResponse
 
 
@@ -13,15 +14,15 @@ class CustomerCreate(BaseModel):
     external_id: str = Field(min_length=1, max_length=100)
     first_name: str = Field(min_length=1, max_length=100)
     last_name: str = Field(min_length=1, max_length=100)
-    email: str
-    phone: str
-    id_number: str = Field(min_length=1, max_length=20)
+    email: EmailStr
+    phone: str = Field(pattern=r"^\+27\d{9}$")
+    id_number: str = Field(min_length=13, max_length=13, pattern=r"^\d{13}$")
     date_of_birth: date
-    kyc_status: str = "pending"
-    tier: str = "standard"
+    kyc_status: KYCStatus = KYCStatus.pending
+    tier: CustomerTier = CustomerTier.standard
     segment: str | None = None
-    risk_rating: str = "low"
-    status: str = "active"
+    risk_rating: RiskRating = RiskRating.low
+    status: CustomerStatus = CustomerStatus.active
     onboarded_at: datetime
 
 
@@ -30,13 +31,13 @@ class CustomerUpdate(BaseModel):
 
     first_name: str | None = None
     last_name: str | None = None
-    email: str | None = None
-    phone: str | None = None
-    kyc_status: str | None = None
-    tier: str | None = None
+    email: EmailStr | None = None
+    phone: str | None = Field(default=None, pattern=r"^\+27\d{9}$")
+    kyc_status: KYCStatus | None = None
+    tier: CustomerTier | None = None
     segment: str | None = None
-    risk_rating: str | None = None
-    status: str | None = None
+    risk_rating: RiskRating | None = None
+    status: CustomerStatus | None = None
 
 
 class CustomerResponse(BaseModel):

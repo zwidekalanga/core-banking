@@ -8,8 +8,8 @@ Creates all core-banking tables: customers, accounts, transactions, admin_users.
 Seeds the 3 default admin users for the fraud-ops portal.
 """
 
+import uuid
 from typing import Sequence, Union
-from uuid import uuid4
 
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
@@ -21,10 +21,13 @@ down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
+# Deterministic UUIDs derived from username — ensures idempotent migrations
+_NS = uuid.NAMESPACE_DNS
+
 # Pre-computed bcrypt hashes (passwords: admin123, analyst123, viewer123)
 SEED_USERS = [
     {
-        "id": str(uuid4()),
+        "id": str(uuid.uuid5(_NS, "admin")),
         "username": "admin",
         "email": "admin@capitec.co.za",
         "hashed_password": "$2b$12$xLbWBxKgZ9Qp5PWE95MtWeruOHmuw1jE4r5YxRhT8v4im6E1RHbJ2",
@@ -33,7 +36,7 @@ SEED_USERS = [
         "is_active": True,
     },
     {
-        "id": str(uuid4()),
+        "id": str(uuid.uuid5(_NS, "analyst")),
         "username": "analyst",
         "email": "analyst@capitec.co.za",
         "hashed_password": "$2b$12$lBbpStox7587rihT1Sfm6ONOeUNUHfJpXHv33ffv46tk1tZ0YpUa6",
@@ -42,7 +45,7 @@ SEED_USERS = [
         "is_active": True,
     },
     {
-        "id": str(uuid4()),
+        "id": str(uuid.uuid5(_NS, "viewer")),
         "username": "viewer",
         "email": "viewer@capitec.co.za",
         "hashed_password": "$2b$12$YOlbalmYLaYetVucK.mAFur10YfO.01RoJ2Pa3bWOM86qBxmdnKTe",
@@ -90,6 +93,8 @@ def upgrade() -> None:
     op.create_index("ix_customers_external_id", "customers", ["external_id"], unique=True)
     op.create_index("idx_customer_status", "customers", ["status"])
     op.create_index("idx_customer_tier", "customers", ["tier"])
+    op.create_index("idx_customer_email", "customers", ["email"], unique=True)
+    op.create_index("idx_customer_id_number", "customers", ["id_number"], unique=True)
 
     # -- accounts --
     op.create_table(

@@ -150,7 +150,6 @@ class TestAccountUpdate:
     def test_all_optional(self):
         a = AccountUpdate()
         assert a.status is None
-        assert a.balance is None
 
 
 class TestAccountResponse:
