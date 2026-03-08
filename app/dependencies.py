@@ -1,45 +1,13 @@
 """Dependency injection for FastAPI."""
 
 from collections.abc import AsyncGenerator
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Annotated
 
 from fastapi import Depends, Request
 from redis.asyncio import Redis
-from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
-    AsyncSession,
-    async_sessionmaker,
-    create_async_engine,
-)
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import Settings, get_settings
-
-# ---------------------------------------------------------------------------
-# Lifespan helpers — called from main.py to create & destroy shared resources
-# ---------------------------------------------------------------------------
-
-
-def create_engine(settings: Settings) -> AsyncEngine:
-    """Create the async database engine."""
-    return create_async_engine(
-        str(settings.database_url),
-        pool_size=settings.db_pool_size,
-        max_overflow=settings.db_max_overflow,
-        pool_pre_ping=True,
-        echo=settings.debug,
-    )
-
-
-def create_session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
-    """Create session factory bound to *engine*."""
-    return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-
-
-def create_redis(settings: Settings) -> Redis:
-    """Create the async Redis client."""
-    return Redis.from_url(str(settings.redis_url), decode_responses=True)
-
 
 # ---------------------------------------------------------------------------
 # FastAPI dependencies — pull resources from app.state (set in lifespan)
@@ -62,46 +30,11 @@ async def get_db_session(request: Request) -> AsyncGenerator[AsyncSession, None]
         except Exception:
             await session.rollback()
             raise
-        finally:
-            await session.close()
 
 
-async def get_redis(request: Request) -> AsyncGenerator[Redis, None]:
+def get_redis(request: Request) -> "Redis":
     """Dependency that provides the Redis client from app.state."""
-    yield request.app.state.redis
-
-
-# ---------------------------------------------------------------------------
-# Standalone infrastructure for non-FastAPI entry-points (ARCH-003)
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class InfrastructureContainer:
-    """Holds shared async resources for non-FastAPI entry-points.
-
-    Replaces module-level global singletons with an explicit,
-    immutable container that callers create and own.
-    """
-
-    engine: AsyncEngine
-    session_factory: async_sessionmaker[AsyncSession]
-    redis: Redis
-
-    @classmethod
-    def from_settings(cls, settings: Settings) -> "InfrastructureContainer":
-        """Factory that wires up engine, session factory, and Redis."""
-        engine = create_engine(settings)
-        return cls(
-            engine=engine,
-            session_factory=create_session_factory(engine),
-            redis=create_redis(settings),
-        )
-
-    async def close(self) -> None:
-        """Dispose of all managed resources."""
-        await self.redis.aclose()
-        await self.engine.dispose()
+    return request.app.state.redis  # type: ignore[no-any-return]
 
 
 # ---------------------------------------------------------------------------

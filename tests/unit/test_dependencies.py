@@ -1,5 +1,6 @@
 """Unit tests for dependency injection utilities."""
 
+import contextlib
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -19,7 +20,7 @@ def _make_mock_request():
             return session
 
         async def __aexit__(self, *args):
-            pass
+            await session.close()
 
     factory = MagicMock()
     factory.return_value = _ContextManager()
@@ -42,10 +43,8 @@ class TestGetDbSession:
         assert yielded_session is session
 
         # Simulate successful completion
-        try:
+        with contextlib.suppress(StopAsyncIteration):
             await gen.__anext__()
-        except StopAsyncIteration:
-            pass
 
         session.commit.assert_awaited_once()
         session.rollback.assert_not_awaited()

@@ -57,7 +57,7 @@ class FraudEvaluationClient:
         response = await stub.Evaluate(request, timeout=timeout)
         return response
 
-    async def close(self):
+    async def close(self) -> None:
         if self._channel is not None:
             await self._channel.close()
             self._channel = None

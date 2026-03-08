@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
 from app.models.account import Account
+from app.models.transaction import Transaction
 from app.repositories.transaction_repository import TransactionRepository
 from app.schemas.transaction import (
     FraudEvaluationResult,
@@ -57,7 +58,7 @@ class TransactionService:
         response.fraud_evaluation = fraud_result
         return response
 
-    async def _evaluate_fraud(self, txn) -> FraudEvaluationResult | None:
+    async def _evaluate_fraud(self, txn: Transaction) -> FraudEvaluationResult | None:
         """Call gRPC fraud service. Returns None on failure."""
         if self._fraud_client is None:
             return None
@@ -112,7 +113,7 @@ class TransactionService:
         )
         return result.scalar_one_or_none()
 
-    async def _publish_to_kafka(self, txn) -> None:
+    async def _publish_to_kafka(self, txn: Transaction) -> None:
         """Publish transaction event. Logs warning on failure."""
         if self._kafka_producer is None:
             return

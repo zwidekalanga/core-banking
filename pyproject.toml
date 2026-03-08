@@ -110,6 +110,15 @@ strict = true
 warn_return_any = true
 warn_unused_ignores = true
 disallow_untyped_defs = true
+exclude = ["app/grpc/generated/"]
+
+[[tool.mypy.overrides]]
+module = ["jose", "jose.*", "grpc", "grpc.*", "aiokafka", "aiokafka.*", "google.protobuf", "google.protobuf.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["app.grpc.generated.*"]
+follow_imports = "skip"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

@@ -1,6 +1,6 @@
 """FastAPI dependencies for authentication and RBAC."""
 
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
@@ -42,7 +42,7 @@ async def get_current_user(
 CurrentUser = Annotated[TokenUser, Depends(get_current_user)]
 
 
-def require_role(*allowed_roles: str):
+def require_role(*allowed_roles: str) -> Any:
     """Dependency factory that enforces role-based access.
 
     Usage:

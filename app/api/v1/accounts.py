@@ -41,7 +41,7 @@ async def get_account_transactions(
     account_id: str,
     account_repo: AccountRepo,
     txn_repo: TransactionRepo,
-):
+) -> Page[TransactionResponse]:
     """Get transactions for a specific account."""
     account = await account_repo.get_by_id(account_id)
     if not account:
@@ -51,7 +51,7 @@ async def get_account_transactions(
         )
 
     query = txn_repo.get_by_account_query(account_id)
-    return await sqlalchemy_paginate(txn_repo.session, query)
+    return await sqlalchemy_paginate(txn_repo.session, query)  # type: ignore[no-any-return]
 
 
 @router.post(

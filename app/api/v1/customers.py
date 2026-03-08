@@ -29,10 +29,10 @@ router = APIRouter()
 async def list_customers(
     repo: CustomerRepo,
     filters: CustomerFilter = FilterDepends(CustomerFilter),
-):
+) -> Page[CustomerResponse]:
     """List customers with optional filtering and pagination."""
     query = repo.get_list_query(filters)
-    return await sqlalchemy_paginate(repo.session, query)
+    return await sqlalchemy_paginate(repo.session, query)  # type: ignore[no-any-return]
 
 
 @router.get(
@@ -85,7 +85,7 @@ async def get_customer_transactions(
     customer_id: str,
     customer_repo: CustomerRepo,
     txn_repo: TransactionRepo,
-):
+) -> Page[TransactionResponse]:
     """Get transaction history for a customer."""
     customer = await customer_repo.get_by_id(customer_id)
     if not customer:
@@ -95,7 +95,7 @@ async def get_customer_transactions(
         )
 
     query = txn_repo.get_by_customer_query(customer_id)
-    return await sqlalchemy_paginate(txn_repo.session, query)
+    return await sqlalchemy_paginate(txn_repo.session, query)  # type: ignore[no-any-return]
 
 
 @router.get(

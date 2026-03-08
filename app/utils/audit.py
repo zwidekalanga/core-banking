@@ -1,5 +1,7 @@
 """Audit logging for privileged actions."""
 
+from typing import Any
+
 from fastapi import Request
 
 from app.auth.dependencies import CurrentUser
@@ -8,7 +10,7 @@ from app.utils.logging import get_logger
 logger = get_logger("audit")
 
 
-def audit_logged(action: str):
+def audit_logged(action: str) -> Any:
     """Dependency factory that logs privileged actions.
 
     Usage::

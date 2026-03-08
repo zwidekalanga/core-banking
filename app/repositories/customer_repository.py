@@ -2,6 +2,7 @@
 
 import asyncio
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,7 +20,7 @@ class CustomerRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    def get_list_query(self, filters: CustomerFilter) -> Select:
+    def get_list_query(self, filters: CustomerFilter) -> Select[Any]:
         """Return a filtered + sorted query — pagination handled by the library."""
         query = filters.filter(select(Customer))
         query = filters.sort(query)

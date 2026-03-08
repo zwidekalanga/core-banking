@@ -1,6 +1,5 @@
 """FastAPI application entry point."""
 
-import uuid as _uuid
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -12,14 +11,14 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from slowapi.util import get_remote_address
-from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
-from starlette.middleware.base import BaseHTTPMiddleware
 
+from app.api.health import router as health_router
 from app.api.v1.router import api_router
 from app.config import get_settings
-from app.dependencies import create_engine, create_redis, create_session_factory
 from app.grpc.fraud_client import FraudEvaluationClient
+from app.infrastructure import create_engine, create_redis, create_session_factory
+from app.middleware import RequestIDMiddleware, SecurityHeadersMiddleware
 from app.services.kafka_producer import create_kafka_producer
 from app.utils.logging import get_logger, setup_logging
 
@@ -40,13 +39,29 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("Environment: %s", settings.environment)
     logger.info("Debug mode: %s", settings.debug)
 
-    engine = create_engine(settings)
-    app.state.engine = engine
-    app.state.session_factory = create_session_factory(engine)
-    app.state.redis = create_redis(settings)
+    try:
+        engine = create_engine(settings)
+        app.state.engine = engine
+        app.state.session_factory = create_session_factory(engine)
+    except Exception:
+        logger.exception("Failed to initialise database engine")
+        raise
+
+    try:
+        app.state.redis = create_redis(settings)
+    except Exception:
+        logger.exception("Failed to initialise Redis client")
+        await engine.dispose()
+        raise
 
     # gRPC fraud client (owned by app, not a module-level singleton)
-    app.state.fraud_client = FraudEvaluationClient(target=settings.fraud_grpc_target)
+    try:
+        app.state.fraud_client = FraudEvaluationClient(target=settings.fraud_grpc_target)
+    except Exception:
+        logger.exception("Failed to initialise gRPC fraud client")
+        await app.state.redis.aclose()
+        await engine.dispose()
+        raise
 
     # Kafka producer (best-effort — service works without Kafka)
     try:
@@ -57,58 +72,24 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     yield
 
-    # Shutdown — dispose every resource we created
+    # Shutdown — dispose every resource; ensure all run even if one fails
     logger.info("Shutting down Core Banking Service...")
-    if app.state.kafka_producer is not None:
-        try:
+    try:
+        if app.state.kafka_producer is not None:
             await app.state.kafka_producer.stop()
-        except Exception:
-            logger.warning("Failed to close Kafka producer", exc_info=True)
+    except Exception:
+        logger.exception("Error closing Kafka producer")
     try:
         await app.state.fraud_client.close()
     except Exception:
-        logger.warning("Failed to close gRPC client", exc_info=True)
-    await app.state.redis.aclose()
-    await engine.dispose()
+        logger.exception("Error closing gRPC fraud client")
+    try:
+        await app.state.redis.aclose()
+    except Exception:
+        logger.exception("Error closing Redis connection")
+    finally:
+        await engine.dispose()
     logger.info("Shutdown complete.")
-
-
-# ---------------------------------------------------------------------------
-# Request ID middleware — inject X-Request-ID for distributed tracing
-# ---------------------------------------------------------------------------
-
-
-class RequestIDMiddleware(BaseHTTPMiddleware):
-    """Inject a unique request ID into every request/response cycle."""
-
-    async def dispatch(self, request: Request, call_next):
-        request_id = request.headers.get("X-Request-ID") or str(_uuid.uuid4())
-        request.state.request_id = request_id
-        response = await call_next(request)
-        response.headers["X-Request-ID"] = request_id
-        return response
-
-
-# ---------------------------------------------------------------------------
-# Security headers middleware
-# ---------------------------------------------------------------------------
-
-
-class SecurityHeadersMiddleware(BaseHTTPMiddleware):
-    """Add standard security headers to every response."""
-
-    async def dispatch(self, request: Request, call_next):
-        response = await call_next(request)
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
-        response.headers["X-XSS-Protection"] = "1; mode=block"
-        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        response.headers["Permissions-Policy"] = "geolocation=(), camera=(), microphone=()"
-        if settings.is_production:
-            response.headers["Strict-Transport-Security"] = (
-                "max-age=63072000; includeSubDomains; preload"
-            )
-        return response
 
 
 # ---------------------------------------------------------------------------
@@ -118,7 +99,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 def _register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(IntegrityError)
-    async def _integrity_error_handler(request: Request, exc: IntegrityError):
+    async def _integrity_error_handler(request: Request, exc: IntegrityError) -> JSONResponse:
         request_id = getattr(request.state, "request_id", "n/a")
         logger.warning(
             "Integrity constraint violation on %s %s (request_id=%s): %s",
@@ -133,7 +114,7 @@ def _register_exception_handlers(app: FastAPI) -> None:
         )
 
     @app.exception_handler(Exception)
-    async def _unhandled_exception_handler(request: Request, _exc: Exception):
+    async def _unhandled_exception_handler(request: Request, _exc: Exception) -> JSONResponse:
         request_id = getattr(request.state, "request_id", "n/a")
         logger.exception(
             "Unhandled exception on %s %s (request_id=%s)",
@@ -168,7 +149,7 @@ def create_application() -> FastAPI:
 
     # Rate limiter
     app.state.limiter = limiter
-    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]  # slowapi typing mismatch
     app.add_middleware(SlowAPIMiddleware)
 
     # Request ID and security headers (outermost = runs first)
@@ -189,51 +170,9 @@ def create_application() -> FastAPI:
     # Exception handlers
     _register_exception_handlers(app)
 
-    # Include API router
+    # Include routers
     app.include_router(api_router, prefix="/api/v1")
-
-    # ------------------------------------------------------------------
-    # Health check endpoints (no prefix)
-    # ------------------------------------------------------------------
-
-    @app.get("/health", tags=["Health"])
-    async def health_check() -> dict[str, str]:
-        """Liveness check — is the process running?"""
-        return {
-            "status": "healthy",
-            "service": "core-banking-service",
-            "version": "1.0.0",
-        }
-
-    @app.get("/ready", tags=["Health"])
-    async def readiness_check(request: Request):
-        """Readiness check — can the service handle traffic?"""
-        checks: dict[str, str] = {}
-
-        # Database
-        try:
-            async with request.app.state.session_factory() as session:
-                await session.execute(text("SELECT 1"))
-            checks["database"] = "ok"
-        except Exception:
-            checks["database"] = "unavailable"
-
-        # Redis
-        try:
-            await request.app.state.redis.ping()
-            checks["redis"] = "ok"
-        except Exception:
-            checks["redis"] = "unavailable"
-
-        all_ok = all(v == "ok" for v in checks.values())
-        payload = {
-            "status": "ready" if all_ok else "degraded",
-            "checks": checks,
-        }
-
-        if not all_ok:
-            return JSONResponse(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, content=payload)
-        return payload
+    app.include_router(health_router)
 
     add_pagination(app)
 

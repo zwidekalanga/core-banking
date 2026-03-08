@@ -68,7 +68,7 @@ async def get_transaction(
 async def list_transactions(
     repo: TransactionRepo,
     filters: TransactionFilter = FilterDepends(TransactionFilter),
-):
+) -> Page[TransactionResponse]:
     """List transactions with optional filtering and pagination."""
     query = repo.get_list_query(filters)
-    return await sqlalchemy_paginate(repo.session, query)
+    return await sqlalchemy_paginate(repo.session, query)  # type: ignore[no-any-return]

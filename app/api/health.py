@@ -1,0 +1,52 @@
+"""Health check endpoints."""
+
+from importlib.metadata import version
+
+from fastapi import APIRouter, Request, status
+from fastapi.responses import JSONResponse
+from sqlalchemy import text
+
+router = APIRouter(tags=["Health"])
+
+SERVICE_VERSION = version("core-banking-service")
+
+
+@router.get("/health")
+async def health_check() -> dict[str, str]:
+    """Liveness check — is the process running?"""
+    return {
+        "status": "healthy",
+        "service": "core-banking-service",
+        "version": SERVICE_VERSION,
+    }
+
+
+@router.get("/ready", response_model=None)
+async def readiness_check(request: Request) -> dict[str, str | dict[str, str]] | JSONResponse:
+    """Readiness check — can the service handle traffic?"""
+    checks: dict[str, str] = {}
+
+    # Database
+    try:
+        async with request.app.state.session_factory() as session:
+            await session.execute(text("SELECT 1"))
+        checks["database"] = "ok"
+    except Exception:
+        checks["database"] = "unavailable"
+
+    # Redis
+    try:
+        await request.app.state.redis.ping()
+        checks["redis"] = "ok"
+    except Exception:
+        checks["redis"] = "unavailable"
+
+    all_ok = all(v == "ok" for v in checks.values())
+    payload = {
+        "status": "ready" if all_ok else "degraded",
+        "checks": checks,
+    }
+
+    if not all_ok:
+        return JSONResponse(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, content=payload)
+    return payload

@@ -98,6 +98,15 @@ async def refresh_token(
 
 
 @router.get("/me", response_model=UserResponse)
-async def get_current_user_info(current_user: CurrentUser) -> UserResponse:
-    """Return the authenticated admin user's profile."""
-    return UserResponse.model_validate(current_user)
+async def get_current_user_info(
+    current_user: CurrentUser,
+    repo: UserRepo,
+) -> UserResponse:
+    """Return the authenticated admin user's fresh profile from the database."""
+    user = await repo.get_by_id(current_user.id)
+    if not user or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found or inactive",
+        )
+    return UserResponse.model_validate(user)
